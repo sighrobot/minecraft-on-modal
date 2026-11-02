@@ -61,7 +61,15 @@ VOL, LIVE = "/vol", "/srv/mc"
 SAVED, SNAPSHOT = f"{VOL}/server", f"{VOL}/latest.tar.gz"
 
 
-@app.function(image=image, volumes={VOL: vol}, timeout=MAX_SESSION_S)
+# A class rather than a bare @app.function because only Cls supports with_options(),
+# which is how main() sizes cpu/memory per session from the CLI flags.
+@app.cls(image=image, volumes={VOL: vol}, timeout=MAX_SESSION_S)
+class Server:
+    @modal.method()
+    def run(self, ram_gb: int):
+        run_server(ram_gb)
+
+
 def run_server(ram_gb: int):
     started, interrupted = time.time(), None
     os.makedirs(LIVE, exist_ok=True)
@@ -179,6 +187,7 @@ def main(ram: int = 4, cpu: float = 2.0):
             "Without --detach the App stops as soon as this entrypoint returns."
         )
     # Container gets the requested heap plus headroom for the JVM itself.
-    call = run_server.with_options(memory=int((ram + 1.5) * 1024), cpu=cpu).spawn(ram)
+    sized = Server.with_options(memory=int((ram + 1.5) * 1024), cpu=cpu)
+    call = sized().run.spawn(ram)
     print(f"Started {call.object_id}. Connect address will appear in:")
     print(f"  modal app logs {app.app_id}")
