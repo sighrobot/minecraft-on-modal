@@ -1,0 +1,29 @@
+# Copy this file to config.toml and edit it. config.toml is gitignored.
+
+# Modal App name, used with `modal app logs <app>` / `modal app stop <app>`.
+app_name = "minecraft"
+
+# Modal Volume that stores the world. Use a different name to run a separate world.
+volume_name = "minecraft-data"
+
+# The server enables the whitelist itself on a fresh world, so a new volume locks
+# everyone out until these are added. Re-applied every session; adding twice is a no-op.
+players = ["your_username"]
+
+# Pin a specific build. Once a newer version opens the world, you can't downgrade it.
+# Vanilla jar URL: minecraft.net/download/server, or downloads.server.url for the
+# version you want in launchermeta.mojang.com/mc/game/version_manifest_v2.json
+server_jar_url = "https://piston-data.mojang.com/v1/objects/33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c/server.jar"
+
+# Base container image. Its Java version must be new enough for the jar above.
+java_image = "eclipse-temurin:25-jre-noble"
+
+# Everything below is optional; these are the defaults.
+
+# Default resources. Override per session with --ram / --cpu.
+ram = 4                # Java heap in GB; the container gets ram + 1.5 GB
+cpu = 2.0              # CPU cores reserved for the container
+
+sync_every_s = 300     # checkpoint interval: max data lost if the container dies abruptly
+max_session_s = 36000  # hard cap so a forgotten server can't bill forever
+stop_timeout_s = 90    # how long to let /stop finish saving before killing the JVM
