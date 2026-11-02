@@ -1,7 +1,8 @@
 """
 Minecraft server on Modal: start on demand, persist to a Modal Volume.
 
-Substitute APP_NAME and VOLUME_NAME below for <app> and <volume>:
+Settings live in config.toml next to this file (copy config.example.toml).
+Substitute its app_name and volume_name for <app> and <volume>:
 
   modal run --detach minecraft.py --ram <gb>   # start a session with that heap size
   modal app stop <app>                         # the only way to stop it
@@ -15,25 +16,41 @@ import sys
 import tarfile
 import threading
 import time
+import tomllib  # Python 3.11+
 import urllib.request
+from pathlib import Path
 
 import modal
 
-APP_NAME = "minecraft"
-VOLUME_NAME = "minecraft-data"
+# Read both locally and in the container, which re-imports this module from /root.
+CONFIG_FILE = Path(__file__).with_name("config.toml")
+CONTAINER_CONFIG = "/root/config.toml"
+REQUIRED = {"app_name", "volume_name", "players", "server_jar_url", "java_image"}
+DEFAULTS = {"ram": 4, "cpu": 2.0, "sync_every_s": 300, "max_session_s": 36000, "stop_timeout_s": 90}
 
-# The server enables the whitelist itself on a fresh world, so a new volume locks
-# everyone out until these are added. Re-applied every session; adding twice is a no-op.
-PLAYERS = ["sighrobot"]
 
-# Pin a specific build. Once a newer version opens the world, you can't downgrade it.
-# Vanilla jar URL: minecraft.net/download/server, or downloads.server.url for the
-# version you want in launchermeta.mojang.com/mc/game/version_manifest_v2.json
-SERVER_JAR_URL = "https://piston-data.mojang.com/v1/objects/33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c/server.jar"
-JAVA_IMAGE = "eclipse-temurin:25-jre-noble"   # must be new enough for the jar pinned above
-SYNC_EVERY_S = 5 * 60           # max data lost if the container dies abruptly
-MAX_SESSION_S = 10 * 3600       # hard cap so a forgotten server can't bill forever
-STOP_TIMEOUT_S = 90             # how long to let /stop finish saving before killing the JVM
+def load_config() -> dict:
+    if not CONFIG_FILE.exists():
+        raise SystemExit(f"Missing {CONFIG_FILE}. Copy config.example.toml to config.toml and edit it.")
+    with open(CONFIG_FILE, "rb") as f:
+        cfg = tomllib.load(f)
+    missing, unknown = REQUIRED - cfg.keys(), cfg.keys() - REQUIRED - DEFAULTS.keys()
+    if missing or unknown:
+        raise SystemExit(
+            f"Bad {CONFIG_FILE.name}: missing {sorted(missing) or 'none'}, unknown {sorted(unknown) or 'none'}"
+        )
+    return {**DEFAULTS, **cfg}
+
+
+CFG = load_config()
+APP_NAME = CFG["app_name"]
+VOLUME_NAME = CFG["volume_name"]
+PLAYERS = CFG["players"]
+SERVER_JAR_URL = CFG["server_jar_url"]
+JAVA_IMAGE = CFG["java_image"]
+SYNC_EVERY_S = CFG["sync_every_s"]
+MAX_SESSION_S = CFG["max_session_s"]
+STOP_TIMEOUT_S = CFG["stop_timeout_s"]
 # The exit codes rsync uses for a file that changed or vanished while it was being read.
 # The server appends to its log throughout every copy, so those are routine here.
 RSYNC_OK = (0, 23, 24)
@@ -55,7 +72,11 @@ def rsync(src: str, dst: str, *extra: str):
 
 app = modal.App(APP_NAME)
 vol = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
-image = modal.Image.from_registry(JAVA_IMAGE, add_python="3.12").apt_install("rsync")
+image = (
+    modal.Image.from_registry(JAVA_IMAGE, add_python="3.12")
+    .apt_install("rsync")
+    .add_local_file(CONFIG_FILE, CONTAINER_CONFIG)
+)
 
 VOL, LIVE = "/vol", "/srv/mc"
 SAVED, SNAPSHOT = f"{VOL}/server", f"{VOL}/latest.tar.gz"
@@ -173,7 +194,7 @@ def run_server(ram_gb: int):
 
 
 @app.local_entrypoint()
-def main(ram: int = 4, cpu: float = 2.0):
+def main(ram: int = CFG["ram"], cpu: float = CFG["cpu"]):
     # spawn(), not remote(): a blocking remote() holds a client-attached input open for the
     # whole session, and disconnecting the client (Ctrl-C, closing the terminal) cancels that
     # input mid-game even though --detach keeps the App itself alive. spawn() returns

@@ -6,7 +6,7 @@ Start a server when you want to play, stop it when you're done, and only pay for
 
 ## How it works
 
-- `minecraft.py` defines a Modal App with one function, `run_server`, running in a Java container ([`eclipse-temurin`](https://hub.docker.com/_/eclipse-temurin)).
+- `minecraft.py` defines a Modal App with one class, `Server`, whose `run` method runs the server in a Java container ([`eclipse-temurin`](https://hub.docker.com/_/eclipse-temurin)).
 - On the first run it downloads the pinned vanilla `server.jar` and accepts the EULA. Later runs restore the server directory from the volume.
 - While the server runs, the world is checkpointed to the volume every 5 minutes.
 - On shutdown (`modal app stop`, the session time cap, or `/stop` in-game) the server saves and syncs to the volume, then writes a `latest.tar.gz` snapshot you can download.
@@ -16,10 +16,11 @@ Start a server when you want to play, stop it when you're done, and only pay for
 New to Modal? Start with the [Getting Started guide](https://modal.com/docs/guide).
 
 1. **Create an account** at [modal.com](https://modal.com/signup).
-2. **Install the client** (Python 3.9+):
+2. **Install the client** (Python 3.11+, which the script needs to read `config.toml`):
 
    ```sh
    pip install modal
+   # or, to get a recent Python automatically: uv tool install modal
    ```
 
 3. **Authenticate** (opens a browser and saves a token to `~/.modal.toml`):
@@ -52,11 +53,17 @@ Useful Modal docs:
 
 ## Before your first run
 
-Open `minecraft.py` and **add your Minecraft username to `PLAYERS`**. A fresh world has the whitelist turned on, so anyone not in that list can't join:
+Copy the example config and **add your Minecraft username to `players`**. A fresh world has the whitelist turned on, so anyone not in that list can't join:
 
-```python
-PLAYERS = ["your_username", "a_friend"]
+```sh
+cp config.example.toml config.toml
 ```
+
+```toml
+players = ["your_username", "a_friend"]
+```
+
+`config.toml` is gitignored, so your settings stay out of the repo. The examples below use the default names (`minecraft`, `minecraft-data`); substitute your `app_name` and `volume_name` if you changed them.
 
 ## Usage
 
@@ -135,27 +142,29 @@ Pass these to `modal run --detach minecraft.py`:
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| **`--ram`** | `4` | Java heap size in GB (`-Xms`/`-Xmx`). The container gets `ram + 1.5` GB so the JVM has headroom. |
-| **`--cpu`** | `2.0` | CPU cores reserved for the container. Fractional values are allowed. |
+| **`--ram`** | `ram` in config (`4`) | Java heap size in GB (`-Xms`/`-Xmx`). The container gets `ram + 1.5` GB so the JVM has headroom. |
+| **`--cpu`** | `cpu` in config (`2.0`) | CPU cores reserved for the container. Fractional values are allowed. |
 
 More RAM and CPU cost more per hour. See [Modal pricing](https://modal.com/pricing).
 
-### Settings in `minecraft.py`
+### Settings in `config.toml`
 
-These are constants at the top of the script. Edit them before running.
+Start from [`config.example.toml`](config.example.toml). The first five settings are required; the rest are optional and fall back to the defaults shown. Unknown keys are rejected, so a typo fails loudly instead of being ignored.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| **`APP_NAME`** | `"minecraft"` | Modal App name. Use it with `modal app logs` / `modal app stop`. |
-| **`VOLUME_NAME`** | `"minecraft-data"` | Modal Volume that stores the world. Use a different name to run a separate world. |
-| **`PLAYERS`** | `["sighrobot"]` | Usernames added to the whitelist at the start of every session. **Change this.** |
-| **`SERVER_JAR_URL`** | pinned vanilla jar | Server jar downloaded on the first run. Find URLs at [minecraft.net/download/server](https://www.minecraft.net/en-us/download/server) or in Mojang's [version manifest](https://launchermeta.mojang.com/mc/game/version_manifest_v2.json) (`downloads.server.url`). |
-| **`JAVA_IMAGE`** | `"eclipse-temurin:25-jre-noble"` | Base container image. Its Java version has to be new enough for the jar. |
-| `SYNC_EVERY_S` | `300` (5 min) | How often the running world is checkpointed to the volume. This is the most you can lose if the container dies abruptly. |
-| `MAX_SESSION_S` | `36000` (10 h) | Hard cap on session length, so a server you forgot about can't keep billing. The server stops cleanly 15 minutes before the cap. |
-| `STOP_TIMEOUT_S` | `90` | How long to wait for `/stop` to finish saving before killing the JVM. |
+| **`app_name`** | `"minecraft"` | Modal App name. Use it with `modal app logs` / `modal app stop`. |
+| **`volume_name`** | `"minecraft-data"` | Modal Volume that stores the world. Use a different name to run a separate world. |
+| **`players`** | `["your_username"]` | Usernames added to the whitelist at the start of every session. **Change this.** |
+| **`server_jar_url`** | pinned vanilla jar | Server jar downloaded on the first run. Find URLs at [minecraft.net/download/server](https://www.minecraft.net/en-us/download/server) or in Mojang's [version manifest](https://launchermeta.mojang.com/mc/game/version_manifest_v2.json) (`downloads.server.url`). |
+| **`java_image`** | `"eclipse-temurin:25-jre-noble"` | Base container image. Its Java version has to be new enough for the jar. |
+| `ram` | `4` | Default Java heap in GB for `--ram`. |
+| `cpu` | `2.0` | Default CPU cores for `--cpu`. |
+| `sync_every_s` | `300` (5 min) | How often the running world is checkpointed to the volume. This is the most you can lose if the container dies abruptly. |
+| `max_session_s` | `36000` (10 h) | Hard cap on session length, so a server you forgot about can't keep billing. The server stops cleanly 15 minutes before the cap. |
+| `stop_timeout_s` | `90` | How long to wait for `/stop` to finish saving before killing the JVM. |
 
-> **Changing versions:** the jar is only downloaded when the volume is empty. To upgrade an existing world, replace `server/server.jar` on the volume (or start with a new `VOLUME_NAME`). **Once a newer version opens the world, you can't downgrade it.** Download a backup first.
+> **Changing versions:** the jar is only downloaded when the volume is empty. To upgrade an existing world, replace `server/server.jar` on the volume (or start with a new `volume_name`). **Once a newer version opens the world, you can't downgrade it.** Download a backup first.
 
 ### Server properties
 
